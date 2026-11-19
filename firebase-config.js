@@ -1,10 +1,10 @@
 const firebaseConfig = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROYECTO.firebaseapp.com",
-  projectId: "TU_PROYECTO",
-  storageBucket: "TU_PROYECTO.appspot.com",
-  messagingSenderId: "TU_SENDER_ID",
-  appId: "TU_APP_ID"
+  apiKey: "AIzaSyDs3UaJ1UUx0E4ChSpeOtr5BjqZSg1ni3Q",
+  authDomain: "despachos-gloria.firebaseapp.com",
+  projectId: "despachos-gloria",
+  storageBucket: "despachos-gloria.firebasestorage.app",
+  messagingSenderId: "481019430570",
+  appId: "1:481019430570:web:41ce49958cbbb4405ef2d3"
 };
 
 firebase.initializeApp(firebaseConfig);
