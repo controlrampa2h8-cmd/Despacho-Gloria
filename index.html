@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Control de Despacho Gloria - TRUPAL</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- SheetJS para leer .XLS crudo de SAP y exportar .XLSX -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="badge-trupal">TRUPAL</span>
+      <div>
+        <h1>Despacho Gloria en Vivo</h1>
+        <small id="currentDateLabel">Cargando fecha...</small>
+      </div>
+    </div>
+    <button id="btnChangeUser" class="btn-ghost hidden" onclick="logoutUser()">Cambiar Usuario</button>
+  </header>
+
+  <!-- PANTALLA 1: SELECCIÓN DE USUARIO / ROL -->
+  <main id="loginView" class="container">
+    <section class="card">
+      <h2>¿Quién ingresa al sistema?</h2>
+      <p class="subtitle">Selecciona tu perfil operativo para iniciar turno.</p>
+
+      <div class="role-group">
+        <h3>Auditoría y Facturación</h3>
+        <button class="role-btn auditor" onclick="selectUser('AUDITOR', 'Auditor Control Rampa')">
+          <span>📊 Auditor / Programador</span>
+          <small>Cargar SAP YSD080, monitorear en vivo y exportar Excel</small>
+        </button>
+      </div>
+
+      <div class="role-group">
+        <h3>Conductores (Registro Pre-Salida)</h3>
+        <div class="grid-3">
+          <button class="role-btn driver" onclick="selectUser('CONDUCTOR', 'Walter')">🚛 Walter</button>
+          <button class="role-btn driver" onclick="selectUser('CONDUCTOR', 'Liver')">🚛 Liver</button>
+          <button class="role-btn driver" onclick="selectUser('CONDUCTOR', 'Max')">🚛 Max</button>
+        </div>
+      </div>
+
+      <div class="role-group">
+        <h3>Operadores de Montacarga (Tipo de Paleta)</h3>
+        <div class="grid-2">
+          <button class="role-btn forklift" onclick="selectUser('MONTACARGA', 'Juan Maraza')">🏗️ Juan Maraza</button>
+          <button class="role-btn forklift" onclick="selectUser('MONTACARGA', 'Jorge Yalta')">🏗️ Jorge Yalta</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- PANTALLA 2: AUDITOR -->
+  <main id="auditorView" class="container hidden">
+    <section class="card">
+      <div class="card-header">
+        <h2>1. Cargar Programa desde SAP (YSD080)</h2>
+        <button class="btn-secondary" onclick="initMasterDataIfNeeded()">Sincronizar Maestros Base</button>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="sapFileInput">Archivo Crudo SAP (.XLS / .XLSX)</label>
+          <input type="file" id="sapFileInput" accept=".xls,.xlsx,.csv" />
+        </div>
+        <div class="field">
+          <label for="filterDateInput">Fecha Pref. Entrega a filtrar</label>
+          <input type="date" id="filterDateInput" />
+        </div>
+        <div class="field align-end">
+          <button class="btn-primary" onclick="processSapFile()">Procesar e Importar</button>
+        </div>
+      </div>
+      <div id="sapPreviewBox" class="hidden">
+        <p id="sapSummaryText" class="info-banner"></p>
+        <div class="table-wrap">
+          <table id="sapPreviewTable">
+            <thead>
+              <tr>
+                <th>Incluir</th>
+                <th>Material</th>
+                <th>Texto Breve</th>
+                <th>O/C</th>
+                <th>Fe.Pref</th>
+                <th>CanPed.</th>
+                <th>Stock Esp.</th>
+                <th>Pedido</th>
+                <th>Orden</th>
+                <th>Ubicación</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="actions-right">
+          <button class="btn-success" onclick="publishDailyProgram()">Publicar Programa del Día en Vivo</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>2. Monitor de Viajes en Vivo y Consolidado</h2>
+        <div class="form-inline">
+          <input type="date" id="monitorDateInput" onchange="subscribeToDayData()" />
+          <button class="btn-success" onclick="exportReqExcel()">📥 Exportar Req Requerimiento (.XLSX)</button>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-box">
+          <span id="kpiViajes">0</span>
+          <label>Viajes Registrados</label>
+        </div>
+        <div class="kpi-box">
+          <span id="kpiPaletas">0</span>
+          <label>Total Paletas</label>
+        </div>
+        <div class="kpi-box">
+          <span id="kpiGloria">0</span>
+          <label>Paletas Gloria</label>
+        </div>
+        <div class="kpi-box">
+          <span id="kpiTrupal">0</span>
+          <label>Paletas Trupal</label>
+        </div>
+        <div class="kpi-box">
+          <span id="kpiCajas">0</span>
+          <label>Total Cajas</label>
+        </div>
+      </div>
+
+      <h3>Viajes Registrados del Día (Orden de Salida)</h3>
+      <div id="liveTripsContainer" class="trips-list"></div>
+
+      <h3 style="margin-top: 24px;">Estado del Programa del Día (Avance por Pedido)</h3>
+      <div class="table-wrap">
+        <table id="programStatusTable">
+          <thead>
+            <tr>
+              <th>Material</th>
+              <th>Descripción</th>
+              <th>Ubicación</th>
+              <th>Pedido / Orden</th>
+              <th>CanPed.</th>
+              <th>Cajas Cargadas</th>
+              <th>Paletas</th>
+              <th>Gloria</th>
+              <th>Trupal</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- PANTALLA 3: CONDUCTOR -->
+  <main id="driverView" class="container hidden">
+    <!-- Modal/Tarjeta de Placa Diaria (1 sola vez por día) -->
+    <section id="plateSetupCard" class="card warning-border hidden">
+      <h2>🚛 Registro de Placa del Turno</h2>
+      <p>Hola <strong id="driverNamePlate"></strong>, ingresa la(s) placa(s) con la(s) que trabajarás hoy. El sistema las recordará para todos tus viajes del día.</p>
+      <div class="form-row">
+        <div class="field">
+          <label for="dailyPlateInput">Placa Tracto / Carreta (Ej: ATT-983 / A2D-947)</label>
+          <input type="text" id="dailyPlateInput" placeholder="ATT-983 / A2D-947" style="text-transform: uppercase;" />
+        </div>
+        <div class="field align-end">
+          <button class="btn-primary" onclick="saveDailyPlate()">Guardar Placa de Hoy</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Formulario de Nuevo Viaje Pre-Salida -->
+    <section id="driverTripCard" class="card hidden">
+      <div class="card-header">
+        <div>
+          <h2>Nuevo Despacho (Pre-Salida)</h2>
+          <p class="subtitle">Conductor: <strong id="driverBadgeName"></strong> | Placa Hoy: <strong id="driverBadgePlate"></strong> <button class="link-btn" onclick="editDailyPlate()">(Editar)</button></p>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="field">
+          <label for="ordenSalidaInput">N° Orden de Salida (Guía Física) *</label>
+          <input type="text" id="ordenSalidaInput" placeholder="Ej: 057610" inputmode="numeric" />
+        </div>
+        <div class="field">
+          <label for="materialSelect">Agregar Material del Programa del Día *</label>
+          <select id="materialSelect">
+            <option value="">-- Selecciona un material --</option>
+          </select>
+        </div>
+        <div class="field align-end">
+          <button class="btn-secondary" onclick="addMaterialToTrip()">+ Agregar Material</button>
+        </div>
+      </div>
+
+      <!-- Lista de materiales agregados al viaje actual -->
+      <div id="tripItemsContainer" class="trip-items-builder"></div>
+
+      <!-- Resumen Obligatorio del Viaje antes de salir -->
+      <div class="trip-total-box">
+        <div class="total-row">
+          <span>Total Cajas Calculadas:</span>
+          <strong id="tripCalcCajas">0</strong>
+        </div>
+        <div class="total-row">
+          <span>Total Paletas Calculadas:</span>
+          <strong id="tripCalcPaletas">0</strong>
+        </div>
+        <div class="field" style="margin-top: 12px;">
+          <label for="confirmTotalPaletasInput">Confirma Total de Paletas que van en la unidad (Obligatorio) *</label>
+          <input type="number" id="confirmTotalPaletasInput" placeholder="Debe coincidir con el total calculado" />
+        </div>
+        <button class="btn-success btn-block" onclick="submitDriverTrip()">✅ Confirmar Carga y Salir a Ruta</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Mis Viajes de Hoy</h3>
+      <div id="driverMyTripsList" class="trips-list"></div>
+    </section>
+  </main>
+
+  <!-- PANTALLA 4: MONTACARGUISTA -->
+  <main id="forkliftView" class="container hidden">
+    <section class="card">
+      <h2>🏗️ Clasificación de Paletas (Gloria vs. TRUPAL)</h2>
+      <p class="subtitle">Operador: <strong id="forkliftBadgeName"></strong>. Detalla por cada material cuántas paletas son de Gloria y cuántas de Trupal.</p>
+      <div id="forkliftTripsList" class="trips-list"></div>
+    </section>
+  </main>
+
+  <!-- Firebase SDKs (Compat v10 para uso directo sin bundler en GitHub Pages) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <script src="firebase-config.js"></script>
+  <script src="master-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
