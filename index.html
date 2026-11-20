@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Control de Despacho Gloria - TRUPAL</title>
-  <link rel="stylesheet" href="styles.css?v=2.0" />
+  <link rel="stylesheet" href="styles.css?v=2.2" />
   <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -68,7 +68,7 @@
         </button>
       </div>
 
-      <div class="auditor-global-controls">
+      <div id="auditorGlobalControls" class="auditor-global-controls hidden">
         <div class="inline-field">
           <label for="monitorDateInput">Fecha Operativa:</label>
           <input type="date" id="monitorDateInput" onchange="subscribeToDayData()" />
@@ -77,8 +77,8 @@
       </div>
     </div>
 
-    <!-- KPIs Permanentes en Parte Superior -->
-    <div class="kpi-grid">
+    <!-- KPIs (Ocultos en Cargar Programa SAP, visibles en Monitor y Estado) -->
+    <div id="auditorKpiGrid" class="kpi-grid hidden">
       <div class="kpi-box">
         <span id="kpiViajes">0</span>
         <label>Viajes Registrados</label>
@@ -108,7 +108,7 @@
           <h2>Cargar Programa desde SAP (YSD080)</h2>
           <p class="subtitle">Sube el archivo crudo de SAP, marca todas las fechas de entrega que necesites y procésalas con un solo clic.</p>
         </div>
-        <button type="button" class="btn-secondary" onclick="initMasterDataIfNeeded()">🔄 Sincronizar Maestros Base</button>
+        <button type="button" id="btnSyncMasters" class="btn-secondary hidden" onclick="initMasterDataIfNeeded()">🔄 Sincronizar Maestros Base</button>
       </div>
 
       <div class="form-row">
@@ -293,8 +293,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
-  <script src="firebase-config.js?v=2.0"></script>
-  <script src="master-data.js?v=2.0"></script>
-  <script src="app.js?v=2.1"></script>
+  <script src="firebase-config.js?v=2.2"></script>
+  <script src="master-data.js?v=2.2"></script>
+  <script src="app.js?v=2.2"></script>
 </body>
 </html>
