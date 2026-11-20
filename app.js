@@ -1,19 +1,21 @@
 // ==========================================
 // ESTADO GLOBAL
 // ==========================================
-let currentUser = null; // { role: 'AUDITOR'|'CONDUCTOR'|'MONTACARGA', name: string }
+let currentUser = null;
 let masterCajas = { ...INITIAL_CAJAS_POR_PALETA };
 let masterUbicaciones = { ...INITIAL_UBICACIONES };
 
-let parsedSapRows = [];
+let rawSapGloriaRows = []; // Todas las filas de Gloria leídas del archivo SAP
+let availableSapDates = []; // [{ dateISO: '2026-11-18', count: 36, selected: true }]
+let parsedSapRows = [];     // Filas filtradas por las fechas marcadas
+
 let dailyProgram = [];
 let dailyTrips = [];
-let tripBuilderItems = []; // Items que está armando el conductor antes de enviar
+let tripBuilderItems = [];
 
 let unsubProgram = null;
 let unsubTrips = null;
 
-// Fecha local YYYY-MM-DD (Lima, Perú)
 function getTodayISO() {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60000;
@@ -32,16 +34,21 @@ function formatSAPDateToISO(val) {
   return String(val);
 }
 
+function formatISOToDisplay(iso) {
+  if (!iso || !iso.includes("-")) return iso;
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
 // ==========================================
 // INICIALIZACIÓN Y SESIÓN
 // ==========================================
 document.addEventListener("DOMContentLoaded", () => {
   const today = getTodayISO();
-  document.getElementById("currentDateLabel").textContent = `Fecha Operativa: ${today}`;
-  document.getElementById("filterDateInput").value = today;
+  document.getElementById("currentDateLabel").textContent = `Fecha Operativa: ${formatISOToDisplay(today)}`;
+  document.getElementById("publishTargetDateInput").value = today;
   document.getElementById("monitorDateInput").value = today;
 
-  // Escuchar cambios en tiempo real en los maestros de Firestore
   db.collection("maestros").doc("cajasPorPaleta").onSnapshot((doc) => {
     if (doc.exists) masterCajas = { ...INITIAL_CAJAS_POR_PALETA, ...doc.data() };
   });
@@ -49,7 +56,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (doc.exists) masterUbicaciones = { ...INITIAL_UBICACIONES, ...doc.data() };
   });
 
-  // Restaurar sesión si existe
   const saved = localStorage.getItem("trupal_gloria_user");
   if (saved) {
     const u = JSON.parse(saved);
@@ -69,6 +75,7 @@ function selectUser(role, name) {
 
   if (role === "AUDITOR") {
     document.getElementById("auditorView").classList.remove("hidden");
+    switchAuditorTab("viajes"); // Por defecto abre en Monitor de Viajes en Vivo (puedes cambiar a 'cargar')
     subscribeToDayData(document.getElementById("monitorDateInput").value);
   } else if (role === "CONDUCTOR") {
     document.getElementById("driverView").classList.remove("hidden");
@@ -91,6 +98,15 @@ function logoutUser() {
   document.getElementById("loginView").classList.remove("hidden");
 }
 
+function switchAuditorTab(tabName) {
+  ["cargar", "viajes", "estado"].forEach((t) => {
+    document.getElementById(`auditorTab_${t}`).classList.add("hidden");
+    document.getElementById(`tabBtn_${t}`).classList.remove("active");
+  });
+  document.getElementById(`auditorTab_${tabName}`).classList.remove("hidden");
+  document.getElementById(`tabBtn_${tabName}`).classList.add("active");
+}
+
 async function initMasterDataIfNeeded() {
   try {
     await db.collection("maestros").doc("cajasPorPaleta").set(masterCajas, { merge: true });
@@ -105,7 +121,7 @@ async function initMasterDataIfNeeded() {
 // SUSCRIPCIÓN EN TIEMPO REAL POR FECHA
 // ==========================================
 function subscribeToDayData(dateStr) {
-  const targetDate = dateStr || getTodayISO();
+  const targetDate = dateStr || document.getElementById("monitorDateInput")?.value || getTodayISO();
   if (unsubProgram) unsubProgram();
   if (unsubTrips) unsubTrips();
 
@@ -135,13 +151,11 @@ function renderAllViews() {
 }
 
 // ==========================================
-// MÓDULO 1: AUDITOR (SAP YSD080 -> PROGRAMA)
+// MÓDULO 1: AUDITOR (SAP MULTI-FECHA -> PROGRAMA)
 // ==========================================
-function processSapFile() {
+function loadSapFileDates() {
   const fileInput = document.getElementById("sapFileInput");
-  const targetDate = document.getElementById("filterDateInput").value;
-  if (!fileInput.files.length) return alert("Selecciona el archivo YSD080 descargado de SAP.");
-  if (!targetDate) return alert("Selecciona la Fecha Preferente de Entrega.");
+  if (!fileInput.files.length) return;
 
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -150,55 +164,112 @@ function processSapFile() {
     const sheetName = workbook.SheetNames.includes("Tabla") ? "Tabla" : workbook.SheetNames[0];
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
 
-    parsedSapRows = rows
-      .filter((r) => {
-        const dest = String(r["Razón Social del Dest. de Mercancía"] || "").toUpperCase();
-        const client = String(r["Razón social"] || "").toUpperCase();
-        const isGloria = dest.includes("GLORIA") || client.includes("GLORIA");
-        const rowDate = formatSAPDateToISO(r["Fe.pref.entrg."]);
-        return isGloria && rowDate === targetDate;
-      })
-      .map((r, idx) => {
-        const mat = String(r["Material"] || "").trim();
-        const ubi = masterUbicaciones[mat] || "SIN UBICACIÓN";
-        const cajasPal = masterCajas[mat] || 0;
-        const canPed = Number(r["CanPed."]) || 0;
-        return {
-          uid: `${r["Pedido"]}_${mat}_${idx}`,
-          incluir: true,
-          material: mat,
-          textoBreve: String(r["Texto Breve"] || "").trim(),
-          oc: String(r["O/C"] || "").trim(),
-          fePrefEntrg: formatSAPDateToISO(r["Fe.pref.entrg."]),
-          canPed: canPed,
-          stockEspecial: Number(r["Stock Especial"]) || 0,
-          pedido: String(r["Pedido"] || "").trim(),
-          orden: r["Orden"] ? String(Math.trunc(Number(r["Orden"]))) : "",
-          ubicacion: ubi,
-          cajasPorPaletaRef: cajasPal,
-          canPalletsEst: cajasPal > 0 ? Math.ceil(canPed / cajasPal) : 0
-        };
-      });
+    // Filtrar solo registros de GLORIA
+    rawSapGloriaRows = rows.filter((r) => {
+      const dest = String(r["Razón Social del Dest. de Mercancía"] || "").toUpperCase();
+      const client = String(r["Razón social"] || "").toUpperCase();
+      return dest.includes("GLORIA") || client.includes("GLORIA");
+    });
 
-    renderSapPreview(targetDate);
+    // Agrupar conteo por Fe.pref.entrg.
+    const countsByDate = {};
+    rawSapGloriaRows.forEach((r) => {
+      const dISO = formatSAPDateToISO(r["Fe.pref.entrg."]);
+      if (dISO) countsByDate[dISO] = (countsByDate[dISO] || 0) + 1;
+    });
+
+    const today = getTodayISO();
+    availableSapDates = Object.keys(countsByDate)
+      .sort()
+      .map((d) => ({
+        dateISO: d,
+        count: countsByDate[d],
+        selected: d === today // Pre-marca hoy si existe
+      }));
+
+    renderSapDateChips();
   };
   reader.readAsArrayBuffer(fileInput.files[0]);
 }
 
-function renderSapPreview(targetDate) {
+function renderSapDateChips() {
+  const box = document.getElementById("sapDatesSelectorBox");
+  const container = document.getElementById("sapDateChipsContainer");
+  if (!availableSapDates.length) {
+    box.classList.add("hidden");
+    return alert("No se encontraron pedidos de GLORIA con fecha válida en este archivo.");
+  }
+
+  box.classList.remove("hidden");
+  container.innerHTML = availableSapDates.map((item, idx) => `
+    <label class="date-chip ${item.selected ? 'selected' : ''}" onclick="toggleSapDateChip(${idx}, event)">
+      <input type="checkbox" ${item.selected ? 'checked' : ''} onchange="event.stopPropagation(); toggleSapDateChip(${idx})" />
+      <span>${formatISOToDisplay(item.dateISO)}</span>
+      <span class="chip-count">${item.count} ped.</span>
+    </label>
+  `).join("");
+}
+
+function toggleSapDateChip(idx, event) {
+  if (event && event.target.tagName === "INPUT") return;
+  availableSapDates[idx].selected = !availableSapDates[idx].selected;
+  renderSapDateChips();
+}
+
+function toggleAllSapDates(state) {
+  availableSapDates.forEach((d) => (d.selected = state));
+  renderSapDateChips();
+}
+
+function processSelectedSapDates() {
+  const selectedSet = new Set(availableSapDates.filter((d) => d.selected).map((d) => d.dateISO));
+  if (!selectedSet.size) return alert("Marca al menos una fecha de entrega para procesar.");
+
+  parsedSapRows = rawSapGloriaRows
+    .filter((r) => selectedSet.has(formatSAPDateToISO(r["Fe.pref.entrg."])))
+    .map((r, idx) => {
+      const mat = String(r["Material"] || "").trim();
+      const ubi = masterUbicaciones[mat] || "SIN UBICACIÓN";
+      const cajasPal = masterCajas[mat] || 0;
+      const canPed = Number(r["CanPed."]) || 0;
+      return {
+        uid: `${r["Pedido"]}_${mat}_${idx}`,
+        incluir: true,
+        material: mat,
+        textoBreve: String(r["Texto Breve"] || "").trim(),
+        oc: String(r["O/C"] || "").trim(),
+        fePrefEntrg: formatSAPDateToISO(r["Fe.pref.entrg."]),
+        canPed: canPed,
+        stockEspecial: Number(r["Stock Especial"]) || 0,
+        pedido: String(r["Pedido"] || "").trim(),
+        orden: r["Orden"] ? String(Math.trunc(Number(r["Orden"]))) : "",
+        ubicacion: ubi,
+        cajasPorPaletaRef: cajasPal,
+        canPalletsEst: cajasPal > 0 ? Math.ceil(canPed / cajasPal) : 0
+      };
+    });
+
+  // Ordenar por fecha preferente y luego por Material
+  parsedSapRows.sort((a, b) => a.fePrefEntrg.localeCompare(b.fePrefEntrg) || a.material.localeCompare(b.material));
+
+  const datesListText = Array.from(selectedSet).sort().map(formatISOToDisplay).join(", ");
+  renderSapPreview(datesListText);
+}
+
+function renderSapPreview(datesListText) {
   const box = document.getElementById("sapPreviewBox");
   const tbody = document.querySelector("#sapPreviewTable tbody");
   box.classList.remove("hidden");
   document.getElementById("sapSummaryText").textContent =
-    `Se encontraron ${parsedSapRows.length} pedidos de GLORIA para la fecha ${targetDate}. Desmarca los que no salgan hoy y publica.`;
+    `Se importaron ${parsedSapRows.length} pedidos de GLORIA correspondientes a: ${datesListText}. Desmarca los que no salgan y publica.`;
 
   tbody.innerHTML = parsedSapRows.map((row, i) => `
     <tr>
-      <td><input type="checkbox" ${row.incluir ? "checked" : ""} onchange="parsedSapRows[${i}].incluir = this.checked" /></td>
+      <td><input type="checkbox" style="width:18px;height:18px;" ${row.incluir ? "checked" : ""} onchange="parsedSapRows[${i}].incluir = this.checked" /></td>
       <td><strong>${row.material}</strong></td>
       <td>${row.textoBreve}</td>
       <td>${row.oc}</td>
-      <td>${row.fePrefEntrg}</td>
+      <td><strong>${formatISOToDisplay(row.fePrefEntrg)}</strong></td>
       <td>${row.canPed.toLocaleString()}</td>
       <td>${row.stockEspecial.toLocaleString()}</td>
       <td>${row.pedido}</td>
@@ -209,7 +280,9 @@ function renderSapPreview(targetDate) {
 }
 
 async function publishDailyProgram() {
-  const targetDate = document.getElementById("filterDateInput").value;
+  const targetDate = document.getElementById("publishTargetDateInput").value;
+  if (!targetDate) return alert("Selecciona la Fecha Operativa en la que se publicará este programa.");
+
   const selected = parsedSapRows.filter((r) => r.incluir);
   if (!selected.length) return alert("No hay filas seleccionadas para publicar.");
 
@@ -221,13 +294,12 @@ async function publishDailyProgram() {
 
   document.getElementById("monitorDateInput").value = targetDate;
   subscribeToDayData(targetDate);
-  alert(`✅ Programa publicado (${selected.length} materiales). Los conductores ya lo ven en sus celulares.`);
+  switchAuditorTab("estado"); // Lleva directo a ver el programa publicado
+  alert(`✅ Programa publicado (${selected.length} materiales) para la fecha operativa ${formatISOToDisplay(targetDate)}.`);
 }
 
 function renderAuditorDashboard() {
   let totalPaletas = 0, totalGloria = 0, totalTrupal = 0, totalCajas = 0;
-
-  // Acumular por uid de programa o material
   const aggByProgramUid = {};
 
   dailyTrips.forEach((t) => {
@@ -252,10 +324,13 @@ function renderAuditorDashboard() {
   document.getElementById("kpiTrupal").textContent = totalTrupal;
   document.getElementById("kpiCajas").textContent = totalCajas.toLocaleString();
 
-  // Render tarjetas de viajes en vivo
+  document.getElementById("badgeTabViajes").textContent = dailyTrips.length;
+  document.getElementById("badgeTabProgram").textContent = dailyProgram.length;
+
+  // Pestaña B: Tarjetas de viajes en vivo
   const tripsDiv = document.getElementById("liveTripsContainer");
   if (!dailyTrips.length) {
-    tripsDiv.innerHTML = `<p class="subtitle">Aún no hay viajes registrados en esta fecha.</p>`;
+    tripsDiv.innerHTML = `<p class="subtitle">Aún no hay viajes registrados en esta fecha operativa.</p>`;
   } else {
     tripsDiv.innerHTML = dailyTrips.map((t) => {
       const hora = new Date(t.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -265,47 +340,69 @@ function renderAuditorDashboard() {
           <div class="card-header">
             <div>
               <strong>Orden Salida N° ${t.ordenSalida}</strong> — 🚛 ${t.conductor} (${t.placa})
-              <div class="item-meta">Hora salida: ${hora} | Total unidad: <strong>${t.totalPaletasConfirmadas} paletas</strong> | Montacarguista: ${t.montacarguista || 'Pendiente'}</div>
+              <div class="item-meta">Hora salida: ${hora} | Total unidad: <strong>${t.totalPaletasConfirmadas} paletas</strong> | Montacarguista: <strong>${t.montacarguista || 'Pendiente'}</strong></div>
             </div>
             <span class="badge ${clasificado ? 'badge-ok' : 'badge-warn'}">
               ${clasificado ? '✅ Paletas Clasificadas' : '⏳ Falta Montacarguista'}
             </span>
           </div>
-          <table>
-            <thead><tr><th>Material</th><th>Descripción</th><th>Orden SAP</th><th>Desglose Carga</th><th>Cajas</th><th>Paletas</th><th>Gloria</th><th>Trupal</th></tr></thead>
-            <tbody>
-              ${(t.items || []).map(it => `
-                <tr>
-                  <td><strong>${it.material}</strong></td>
-                  <td>${it.textoBreve}</td>
-                  <td>${it.orden || '-'}</td>
-                  <td>${it.resumenCalculo}</td>
-                  <td><strong>${it.totalCajas.toLocaleString()}</strong></td>
-                  <td>${it.totalPaletas}</td>
-                  <td>${it.paletasGloria ?? '-'}</td>
-                  <td>${it.paletasTrupal ?? '-'}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Material</th><th>Descripción</th><th>Orden SAP</th><th>Desglose Carga</th><th>Cajas</th><th>Paletas</th><th>Gloria</th><th>Trupal</th></tr></thead>
+              <tbody>
+                ${(t.items || []).map(it => `
+                  <tr>
+                    <td><strong>${it.material}</strong></td>
+                    <td>${it.textoBreve}</td>
+                    <td>${it.orden || '-'}</td>
+                    <td>${it.resumenCalculo}</td>
+                    <td><strong>${it.totalCajas.toLocaleString()}</strong></td>
+                    <td>${it.totalPaletas}</td>
+                    <td>${it.paletasGloria ?? '-'}</td>
+                    <td>${it.paletasTrupal ?? '-'}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
         </div>
       `;
     }).join("");
   }
 
-  // Render tabla consolidada del programa
+  // Pestaña C: Tabla consolidada del programa con buscador
+  const searchFilter = (document.getElementById("programSearchInput")?.value || "").toLowerCase().trim();
+  const filteredProgram = dailyProgram.filter((p) => {
+    if (!searchFilter) return true;
+    return (
+      p.material.toLowerCase().includes(searchFilter) ||
+      p.textoBreve.toLowerCase().includes(searchFilter) ||
+      String(p.orden).toLowerCase().includes(searchFilter) ||
+      String(p.pedido).toLowerCase().includes(searchFilter)
+    );
+  });
+
   const progBody = document.querySelector("#programStatusTable tbody");
-  progBody.innerHTML = dailyProgram.map((p) => {
+  if (!filteredProgram.length) {
+    progBody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:#64748b;">No hay líneas de programa para mostrar en esta fecha.</td></tr>`;
+    return;
+  }
+
+  progBody.innerHTML = filteredProgram.map((p) => {
     const st = aggByProgramUid[p.uid] || { cajas: 0, paletas: 0, gloria: 0, trupal: 0 };
+    const saldoPend = Math.max(0, p.canPed - st.cajas);
     const statusText = st.cajas === 0 ? "PENDIENTE" : (st.cajas >= p.canPed ? "DESPACHADO" : "PARCIAL");
     return `
       <tr>
         <td><strong>${p.material}</strong></td>
         <td>${p.textoBreve}</td>
         <td>${masterUbicaciones[p.material] || p.ubicacion}</td>
+        <td>${p.oc}</td>
+        <td>${formatISOToDisplay(p.fePrefEntrg)}</td>
         <td>${p.pedido} / ${p.orden}</td>
         <td>${p.canPed.toLocaleString()}</td>
         <td><strong>${st.cajas.toLocaleString()}</strong></td>
+        <td>${saldoPend.toLocaleString()}</td>
         <td>${st.paletas}</td>
         <td>${st.gloria}</td>
         <td>${st.trupal}</td>
@@ -331,14 +428,13 @@ function exportReqExcel() {
     });
   });
 
-  // Hoja 1: Formato exacto Req Requerimiento
   const rowsReq = dailyProgram.map((p) => {
     const st = aggByProgramUid[p.uid] || { cajas: 0, paletas: 0, gloria: 0, trupal: 0 };
     return {
       "Material": p.material,
       "Texto Breve": p.textoBreve,
       "O/C": p.oc,
-      "Fe.pref.entrg.": p.fePrefEntrg,
+      "Fe.pref.entrg.": formatISOToDisplay(p.fePrefEntrg),
       "CanPed.": p.canPed,
       "Stock Especial": p.stockEspecial,
       "Pedido": p.pedido,
@@ -352,7 +448,6 @@ function exportReqExcel() {
     };
   });
 
-  // Hoja 2: Detalle por Viaje / Orden de Salida (Reemplazo Guía Física)
   const rowsViajes = [];
   dailyTrips.forEach((t) => {
     (t.items || []).forEach((it) => {
@@ -451,7 +546,7 @@ function addMaterialToTrip() {
     ubicacionActual: sinUbicacion ? "" : currentUbi,
     cajasPorPaletaStd: defaultCajasPal,
     cantPaletasStd: "",
-    saldos: [] // [{ cajasPorPaleta: '', cantPaletas: 1 }]
+    saldos: []
   });
 
   document.getElementById("materialSelect").value = "";
@@ -645,12 +740,10 @@ async function submitDriverTrip() {
   }
 
   try {
-    // 1. Si hubo materiales sin ubicación, actualizar maestro automáticamente
     if (Object.keys(newUbicacionesToSave).length > 0) {
       await db.collection("maestros").doc("ubicaciones").set(newUbicacionesToSave, { merge: true });
     }
 
-    // 2. Guardar viaje en tiempo real
     await db.collection("viajes").add({
       fechaOperativa: getTodayISO(),
       timestamp: Date.now(),
@@ -663,7 +756,6 @@ async function submitDriverTrip() {
       items: finalItems
     });
 
-    // Limpiar formulario
     tripBuilderItems = [];
     document.getElementById("ordenSalidaInput").value = "";
     document.getElementById("confirmTotalPaletasInput").value = "";
