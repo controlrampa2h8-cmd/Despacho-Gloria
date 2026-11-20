@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Control de Despacho Gloria - TRUPAL</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=2.0" />
   <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -57,13 +57,13 @@
     <!-- Barra de Control Global y Pestañas -->
     <div class="auditor-nav-bar">
       <div class="tabs-group">
-        <button id="tabBtn_cargar" class="tab-btn active" onclick="switchAuditorTab('cargar')">
+        <button type="button" id="tabBtn_cargar" class="tab-btn active" onclick="switchAuditorTab('cargar')">
           📥 1. Cargar Programa SAP
         </button>
-        <button id="tabBtn_viajes" class="tab-btn" onclick="switchAuditorTab('viajes')">
+        <button type="button" id="tabBtn_viajes" class="tab-btn" onclick="switchAuditorTab('viajes')">
           🚛 2. Monitor de Viajes en Vivo <span id="badgeTabViajes" class="tab-counter">0</span>
         </button>
-        <button id="tabBtn_estado" class="tab-btn" onclick="switchAuditorTab('estado')">
+        <button type="button" id="tabBtn_estado" class="tab-btn" onclick="switchAuditorTab('estado')">
           📊 3. Estado del Programa (Avance) <span id="badgeTabProgram" class="tab-counter">0</span>
         </button>
       </div>
@@ -73,7 +73,7 @@
           <label for="monitorDateInput">Fecha Operativa:</label>
           <input type="date" id="monitorDateInput" onchange="subscribeToDayData()" />
         </div>
-        <button class="btn-success" onclick="exportReqExcel()">📥 Exportar Excel (.XLSX)</button>
+        <button type="button" class="btn-success" onclick="exportReqExcel()">📥 Exportar Excel (.XLSX)</button>
       </div>
     </div>
 
@@ -106,15 +106,18 @@
       <div class="card-header">
         <div>
           <h2>Cargar Programa desde SAP (YSD080)</h2>
-          <p class="subtitle">Sube el archivo crudo de SAP, marca una o varias fechas de entrega y procésalas con un solo clic.</p>
+          <p class="subtitle">Sube el archivo crudo de SAP, marca todas las fechas de entrega que necesites y procésalas con un solo clic.</p>
         </div>
-        <button class="btn-secondary" onclick="initMasterDataIfNeeded()">🔄 Sincronizar Maestros Base</button>
+        <button type="button" class="btn-secondary" onclick="initMasterDataIfNeeded()">🔄 Sincronizar Maestros Base</button>
       </div>
 
       <div class="form-row">
         <div class="field" style="max-width: 420px;">
           <label for="sapFileInput">1. Selecciona Archivo Crudo SAP (.XLS / .XLSX)</label>
           <input type="file" id="sapFileInput" accept=".xls,.xlsx,.csv" onchange="loadSapFileDates()" />
+        </div>
+        <div class="field align-end" style="max-width: 220px;">
+          <button type="button" class="btn-primary" onclick="loadSapFileDates()">📂 Leer Fechas del Archivo</button>
         </div>
         <div class="field" style="max-width: 240px;">
           <label for="publishTargetDateInput">2. Publicar en Fecha Operativa:</label>
@@ -125,7 +128,7 @@
       <!-- Selector dinámico de múltiples fechas detectadas en el archivo SAP -->
       <div id="sapDatesSelectorBox" class="multi-date-box hidden">
         <div class="card-header" style="margin-bottom: 8px;">
-          <label>3. Selecciona las Fechas Preferentes de Entrega (`Fe.pref.entrg.`) que deseas incluir:</label>
+          <label>3. Marca todas las Fechas Preferentes de Entrega (`Fe.pref.entrg.`) que deseas incluir:</label>
           <div class="quick-btns">
             <button type="button" class="btn-secondary" onclick="toggleAllSapDates(true)">Marcar Todas</button>
             <button type="button" class="btn-secondary" onclick="toggleAllSapDates(false)">Limpiar Selección</button>
@@ -133,7 +136,7 @@
         </div>
         <div id="sapDateChipsContainer" class="date-chips-grid"></div>
         <div style="margin-top: 12px;">
-          <button class="btn-primary" onclick="processSelectedSapDates()">⚡ Procesar e Importar Fechas Seleccionadas</button>
+          <button type="button" class="btn-primary" onclick="processSelectedSapDates()">⚡ Procesar e Importar Fechas Seleccionadas</button>
         </div>
       </div>
 
@@ -141,7 +144,7 @@
       <div id="sapPreviewBox" class="hidden" style="margin-top: 16px;">
         <div class="card-header">
           <p id="sapSummaryText" class="info-banner" style="margin:0; flex:1;"></p>
-          <button class="btn-success" onclick="publishDailyProgram()">✅ Publicar Programa del Día en Vivo</button>
+          <button type="button" class="btn-success" onclick="publishDailyProgram()">✅ Publicar Programa del Día en Vivo</button>
         </div>
         <div class="table-wrap">
           <table id="sapPreviewTable">
@@ -183,7 +186,7 @@
           <h2>Estado del Programa del Día (Avance por Pedido)</h2>
           <p class="subtitle">Consolidado por línea de pedido SAP vs. carga real despachada en patio.</p>
         </div>
-        <div class="field" style="max-width: 300px;">
+        <div class="field" style="max-width: 320px;">
           <input type="text" id="programSearchInput" placeholder="🔍 Filtrar por material, descripción u orden..." oninput="renderAuditorDashboard()" />
         </div>
       </div>
@@ -223,7 +226,7 @@
           <input type="text" id="dailyPlateInput" placeholder="ATT-983 / A2D-947" style="text-transform: uppercase;" />
         </div>
         <div class="field align-end">
-          <button class="btn-primary" onclick="saveDailyPlate()">Guardar Placa de Hoy</button>
+          <button type="button" class="btn-primary" onclick="saveDailyPlate()">Guardar Placa de Hoy</button>
         </div>
       </div>
     </section>
@@ -232,7 +235,7 @@
       <div class="card-header">
         <div>
           <h2>Nuevo Despacho (Pre-Salida)</h2>
-          <p class="subtitle">Conductor: <strong id="driverBadgeName"></strong> | Placa Hoy: <strong id="driverBadgePlate"></strong> <button class="link-btn" onclick="editDailyPlate()">(Editar)</button></p>
+          <p class="subtitle">Conductor: <strong id="driverBadgeName"></strong> | Placa Hoy: <strong id="driverBadgePlate"></strong> <button type="button" class="link-btn" onclick="editDailyPlate()">(Editar)</button></p>
         </div>
       </div>
 
@@ -248,7 +251,7 @@
           </select>
         </div>
         <div class="field align-end">
-          <button class="btn-secondary" onclick="addMaterialToTrip()">+ Agregar Material</button>
+          <button type="button" class="btn-secondary" onclick="addMaterialToTrip()">+ Agregar Material</button>
         </div>
       </div>
 
@@ -267,7 +270,7 @@
           <label for="confirmTotalPaletasInput">Confirma Total de Paletas que van en la unidad (Obligatorio) *</label>
           <input type="number" id="confirmTotalPaletasInput" placeholder="Debe coincidir con el total calculado" />
         </div>
-        <button class="btn-success btn-block" onclick="submitDriverTrip()">✅ Confirmar Carga y Salir a Ruta</button>
+        <button type="button" class="btn-success btn-block" onclick="submitDriverTrip()">✅ Confirmar Carga y Salir a Ruta</button>
       </div>
     </section>
 
@@ -290,8 +293,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
-  <script src="firebase-config.js"></script>
-  <script src="master-data.js"></script>
-  <script src="app.js"></script>
+  <script src="firebase-config.js?v=2.0"></script>
+  <script src="master-data.js?v=2.0"></script>
+  <script src="app.js?v=2.0"></script>
 </body>
 </html>
