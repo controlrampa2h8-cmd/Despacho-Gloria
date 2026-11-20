@@ -6,7 +6,7 @@ let masterCajas = { ...INITIAL_CAJAS_POR_PALETA };
 let masterUbicaciones = { ...INITIAL_UBICACIONES };
 
 let rawSapGloriaRows = []; // Filas filtradas de Gloria + Lima + Pendientes
-let availableSapDates = []; // [{ dateISO: '2026-11-20', count: 15, selected: true }]
+let availableSapDates = []; // [{ dateISO: '2026-11-20', count: 20, selected: true }]
 let parsedSapRows = [];     // Filas finales de las fechas marcadas
 
 let dailyProgram = [];
@@ -40,6 +40,18 @@ function formatISOToDisplay(iso) {
   return `${d}/${m}/${y}`;
 }
 
+function setElementVisible(elOrId, visible) {
+  const el = typeof elOrId === "string" ? document.getElementById(elOrId) : elOrId;
+  if (!el) return;
+  if (visible) {
+    el.classList.remove("hidden");
+    el.style.display = "";
+  } else {
+    el.classList.add("hidden");
+    el.style.display = "none";
+  }
+}
+
 // ==========================================
 // INICIALIZACIÓN Y SESIÓN
 // ==========================================
@@ -55,9 +67,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (doc.exists && Object.keys(doc.data() || {}).length > 0) {
       masterCajas = { ...INITIAL_CAJAS_POR_PALETA, ...doc.data() };
       localStorage.setItem("trupal_masters_synced", "true");
-      if (btnSync) btnSync.classList.add("hidden");
+      setElementVisible(btnSync, false);
     } else if (!localStorage.getItem("trupal_masters_synced")) {
-      if (btnSync) btnSync.classList.remove("hidden");
+      setElementVisible(btnSync, true);
     }
   });
 
@@ -76,22 +88,22 @@ function selectUser(role, name) {
   currentUser = { role, name };
   localStorage.setItem("trupal_gloria_user", JSON.stringify(currentUser));
 
-  document.getElementById("loginView").classList.add("hidden");
-  document.getElementById("auditorView").classList.add("hidden");
-  document.getElementById("driverView").classList.add("hidden");
-  document.getElementById("forkliftView").classList.add("hidden");
-  document.getElementById("btnChangeUser").classList.remove("hidden");
+  setElementVisible("loginView", false);
+  setElementVisible("auditorView", false);
+  setElementVisible("driverView", false);
+  setElementVisible("forkliftView", false);
+  setElementVisible("btnChangeUser", true);
 
   if (role === "AUDITOR") {
-    document.getElementById("auditorView").classList.remove("hidden");
+    setElementVisible("auditorView", true);
     switchAuditorTab("cargar");
     subscribeToDayData(document.getElementById("monitorDateInput").value);
   } else if (role === "CONDUCTOR") {
-    document.getElementById("driverView").classList.remove("hidden");
+    setElementVisible("driverView", true);
     setupDriverView();
     subscribeToDayData(getTodayISO());
   } else if (role === "MONTACARGA") {
-    document.getElementById("forkliftView").classList.remove("hidden");
+    setElementVisible("forkliftView", true);
     document.getElementById("forkliftBadgeName").textContent = name;
     subscribeToDayData(getTodayISO());
   }
@@ -100,25 +112,24 @@ function selectUser(role, name) {
 function logoutUser() {
   localStorage.removeItem("trupal_gloria_user");
   currentUser = null;
-  document.getElementById("btnChangeUser").classList.add("hidden");
-  document.getElementById("auditorView").classList.add("hidden");
-  document.getElementById("driverView").classList.add("hidden");
-  document.getElementById("forkliftView").classList.add("hidden");
-  document.getElementById("loginView").classList.remove("hidden");
+  setElementVisible("btnChangeUser", false);
+  setElementVisible("auditorView", false);
+  setElementVisible("driverView", false);
+  setElementVisible("forkliftView", false);
+  setElementVisible("loginView", true);
 }
 
 function switchAuditorTab(tabName) {
   ["cargar", "viajes", "estado"].forEach((t) => {
-    document.getElementById(`auditorTab_${t}`).classList.add("hidden");
-    document.getElementById(`tabBtn_${t}`).classList.remove("active");
+    setElementVisible(`auditorTab_${t}`, t === tabName);
+    const tabBtn = document.getElementById(`tabBtn_${t}`);
+    if (tabBtn) tabBtn.classList.toggle("active", t === tabName);
   });
-  document.getElementById(`auditorTab_${tabName}`).classList.remove("hidden");
-  document.getElementById(`tabBtn_${tabName}`).classList.add("active");
 
   // Mostrar KPIs, Fecha Operativa y Exportar Excel SOLO en 'viajes' y 'estado'
   const showMonitorWidgets = tabName !== "cargar";
-  document.getElementById("auditorKpiGrid").classList.toggle("hidden", !showMonitorWidgets);
-  document.getElementById("auditorGlobalControls").classList.toggle("hidden", !showMonitorWidgets);
+  setElementVisible("auditorKpiGrid", showMonitorWidgets);
+  setElementVisible("auditorGlobalControls", showMonitorWidgets);
 }
 
 // Minimizar / Maximizar secciones colapsables
@@ -127,9 +138,11 @@ function toggleCollapseSection(bodyId, btnId, forceExpand = null) {
   const btn = document.getElementById(btnId);
   if (!body || !btn) return;
 
-  const shouldHide = forceExpand !== null ? !forceExpand : !body.classList.contains("hidden");
-  body.classList.toggle("hidden", shouldHide);
-  btn.textContent = shouldHide ? "➕ Maximizar" : "➖ Minimizar";
+  const isCurrentlyHidden = body.classList.contains("hidden") || body.style.display === "none";
+  const shouldShow = forceExpand !== null ? forceExpand : isCurrentlyHidden;
+
+  setElementVisible(body, shouldShow);
+  btn.textContent = shouldShow ? "➖ Minimizar" : "➕ Maximizar";
 }
 
 async function initMasterDataIfNeeded() {
@@ -137,8 +150,7 @@ async function initMasterDataIfNeeded() {
     await db.collection("maestros").doc("cajasPorPaleta").set(masterCajas, { merge: true });
     await db.collection("maestros").doc("ubicaciones").set(masterUbicaciones, { merge: true });
     localStorage.setItem("trupal_masters_synced", "true");
-    const btnSync = document.getElementById("btnSyncMasters");
-    if (btnSync) btnSync.classList.add("hidden");
+    setElementVisible("btnSyncMasters", false);
     alert("✅ Tablas maestras sincronizadas en la nube. Este botón ya no volverá a mostrarse.");
   } catch (e) {
     alert("Error sincronizando maestros: " + e.message);
@@ -224,7 +236,7 @@ function loadSapFileDates() {
 
     // Al leer un archivo nuevo, asegurar que el selector de fechas esté maximizado y el botón Procesar visible
     toggleCollapseSection("sapDatesCollapseBody", "btnToggleDatesCollapse", true);
-    document.getElementById("processDatesBtnWrap").classList.remove("hidden");
+    setElementVisible("processDatesBtnWrap", true);
     renderSapDateChips();
   };
   reader.readAsArrayBuffer(fileInput.files[0]);
@@ -234,11 +246,11 @@ function renderSapDateChips() {
   const box = document.getElementById("sapDatesSelectorBox");
   const container = document.getElementById("sapDateChipsContainer");
   if (!availableSapDates.length) {
-    box.classList.add("hidden");
+    setElementVisible(box, false);
     return alert("No se encontraron pedidos de GLORIA (Región LIMA - No tratado / Tratado parcialmente) en este archivo.");
   }
 
-  box.classList.remove("hidden");
+  setElementVisible(box, true);
   container.innerHTML = availableSapDates.map((item, idx) => `
     <label class="date-chip ${item.selected ? 'selected' : ''}" onclick="toggleSapDateChip(${idx}, event)">
       <input type="checkbox" ${item.selected ? 'checked' : ''} onchange="event.stopPropagation(); toggleSapDateChip(${idx})" />
@@ -249,7 +261,7 @@ function renderSapDateChips() {
 }
 
 function showProcessDatesButtonAgain() {
-  document.getElementById("processDatesBtnWrap").classList.remove("hidden");
+  setElementVisible("processDatesBtnWrap", true);
 }
 
 function toggleSapDateChip(idx, event) {
@@ -296,7 +308,7 @@ function processSelectedSapDates() {
   parsedSapRows.sort((a, b) => a.fePrefEntrg.localeCompare(b.fePrefEntrg) || a.material.localeCompare(b.material));
 
   // Ocultar el botón "Procesar e Importar Fechas Seleccionadas" hasta que se elija/modifique una fecha
-  document.getElementById("processDatesBtnWrap").classList.add("hidden");
+  setElementVisible("processDatesBtnWrap", false);
 
   // Mostrar el botón "Publicar Programa del Día en Vivo" listo para publicar
   resetPublishButtonState();
@@ -307,10 +319,8 @@ function processSelectedSapDates() {
 }
 
 function resetPublishButtonState() {
-  const btnPub = document.getElementById("btnPublishDailyProgram");
-  const badgePub = document.getElementById("publishedStatusBadge");
-  if (btnPub) btnPub.classList.remove("hidden");
-  if (badgePub) badgePub.classList.add("hidden");
+  setElementVisible("btnPublishDailyProgram", true);
+  setElementVisible("publishedStatusBadge", false);
 }
 
 function onTargetDateChange() {
@@ -327,7 +337,7 @@ function toggleRowInclusion(idx, isChecked) {
 function renderSapPreview(datesListText) {
   const box = document.getElementById("sapPreviewBox");
   const tbody = document.querySelector("#sapPreviewTable tbody");
-  box.classList.remove("hidden");
+  setElementVisible(box, true);
   document.getElementById("sapSummaryText").textContent =
     `Se importaron ${parsedSapRows.length} pedidos de GLORIA (LIMA - Pendientes) para: ${datesListText}. Desmarca los que no salgan y publica.`;
 
@@ -361,10 +371,10 @@ async function publishDailyProgram() {
   });
 
   // Ocultar el botón de publicar tras publicar; reaparecerá solo si se actualiza algo o se elige otro día
-  document.getElementById("btnPublishDailyProgram").classList.add("hidden");
+  setElementVisible("btnPublishDailyProgram", false);
   const badgePub = document.getElementById("publishedStatusBadge");
   badgePub.textContent = `✅ Publicado (${formatISOToDisplay(targetDate)})`;
-  badgePub.classList.remove("hidden");
+  setElementVisible(badgePub, true);
 
   document.getElementById("monitorDateInput").value = targetDate;
   subscribeToDayData(targetDate);
@@ -564,11 +574,11 @@ function setupDriverView() {
   const savedPlate = localStorage.getItem(getPlateStorageKey());
   if (!savedPlate) {
     document.getElementById("driverNamePlate").textContent = currentUser.name;
-    document.getElementById("plateSetupCard").classList.remove("hidden");
-    document.getElementById("driverTripCard").classList.add("hidden");
+    setElementVisible("plateSetupCard", true);
+    setElementVisible("driverTripCard", false);
   } else {
-    document.getElementById("plateSetupCard").classList.add("hidden");
-    document.getElementById("driverTripCard").classList.remove("hidden");
+    setElementVisible("plateSetupCard", false);
+    setElementVisible("driverTripCard", true);
     document.getElementById("driverBadgeName").textContent = currentUser.name;
     document.getElementById("driverBadgePlate").textContent = savedPlate;
   }
@@ -585,8 +595,8 @@ function saveDailyPlate() {
 function editDailyPlate() {
   const current = localStorage.getItem(getPlateStorageKey()) || "";
   document.getElementById("dailyPlateInput").value = current;
-  document.getElementById("plateSetupCard").classList.remove("hidden");
-  document.getElementById("driverTripCard").classList.add("hidden");
+  setElementVisible("plateSetupCard", true);
+  setElementVisible("driverTripCard", false);
 }
 
 function populateDriverMaterialDropdown() {
