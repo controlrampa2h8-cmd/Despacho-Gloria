@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Control de Despacho Gloria - TRUPAL</title>
-  <link rel="stylesheet" href="styles.css?v=2.2" />
+  <link rel="stylesheet" href="styles.css?v=2.3" />
   <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -121,32 +121,39 @@
         </div>
         <div class="field" style="max-width: 240px;">
           <label for="publishTargetDateInput">2. Publicar en Fecha Operativa:</label>
-          <input type="date" id="publishTargetDateInput" />
+          <input type="date" id="publishTargetDateInput" onchange="onTargetDateChange()" />
         </div>
       </div>
 
-      <!-- Selector dinámico de múltiples fechas detectadas en el archivo SAP -->
+      <!-- Selector dinámico de múltiples fechas detectadas en el archivo SAP (Minimizable) -->
       <div id="sapDatesSelectorBox" class="multi-date-box hidden">
         <div class="card-header" style="margin-bottom: 8px;">
-          <label>3. Marca todas las Fechas Preferentes de Entrega (`Fe.pref.entrg.`) que deseas incluir:</label>
+          <label>3. Fechas Preferentes de Entrega (`Fe.pref.entrg.`) disponibles:</label>
           <div class="quick-btns">
             <button type="button" class="btn-secondary" onclick="toggleAllSapDates(true)">Marcar Todas</button>
             <button type="button" class="btn-secondary" onclick="toggleAllSapDates(false)">Limpiar Selección</button>
+            <button type="button" id="btnToggleDatesCollapse" class="btn-secondary" onclick="toggleCollapseSection('sapDatesCollapseBody', 'btnToggleDatesCollapse')">➖ Minimizar</button>
           </div>
         </div>
-        <div id="sapDateChipsContainer" class="date-chips-grid"></div>
-        <div style="margin-top: 12px;">
-          <button type="button" class="btn-primary" onclick="processSelectedSapDates()">⚡ Procesar e Importar Fechas Seleccionadas</button>
+        <div id="sapDatesCollapseBody">
+          <div id="sapDateChipsContainer" class="date-chips-grid"></div>
+          <div id="processDatesBtnWrap" style="margin-top: 12px;">
+            <button type="button" class="btn-primary" onclick="processSelectedSapDates()">⚡ Procesar e Importar Fechas Seleccionadas</button>
+          </div>
         </div>
       </div>
 
-      <!-- Vista Previa de Pedidos Filtrados -->
+      <!-- Vista Previa de Pedidos Filtrados (Minimizable) -->
       <div id="sapPreviewBox" class="hidden" style="margin-top: 16px;">
         <div class="card-header">
           <p id="sapSummaryText" class="info-banner" style="margin:0; flex:1;"></p>
-          <button type="button" class="btn-success" onclick="publishDailyProgram()">✅ Publicar Programa del Día en Vivo</button>
+          <div class="quick-btns">
+            <button type="button" id="btnTogglePreviewCollapse" class="btn-secondary" onclick="toggleCollapseSection('sapPreviewCollapseBody', 'btnTogglePreviewCollapse')">➖ Minimizar</button>
+            <button type="button" id="btnPublishDailyProgram" class="btn-success" onclick="publishDailyProgram()">✅ Publicar Programa del Día en Vivo</button>
+            <span id="publishedStatusBadge" class="badge badge-ok hidden" style="padding: 9px 12px; font-size: 0.85rem;">✅ Programa Publicado en Vivo</span>
+          </div>
         </div>
-        <div class="table-wrap">
+        <div id="sapPreviewCollapseBody" class="table-wrap">
           <table id="sapPreviewTable">
             <thead>
               <tr>
@@ -293,8 +300,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
-  <script src="firebase-config.js?v=2.2"></script>
-  <script src="master-data.js?v=2.2"></script>
-  <script src="app.js?v=2.2"></script>
+  <script src="firebase-config.js?v=2.3"></script>
+  <script src="master-data.js?v=2.3"></script>
+  <script src="app.js?v=2.3"></script>
 </body>
 </html>
