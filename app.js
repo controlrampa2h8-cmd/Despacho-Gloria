@@ -5,9 +5,9 @@ let currentUser = null;
 let masterCajas = { ...INITIAL_CAJAS_POR_PALETA };
 let masterUbicaciones = { ...INITIAL_UBICACIONES };
 
-let rawSapGloriaRows = []; // Todas las filas de Gloria leídas del archivo SAP
-let availableSapDates = []; // [{ dateISO: '2026-11-18', count: 36, selected: true }]
-let parsedSapRows = [];     // Filas filtradas por las fechas marcadas
+let rawSapGloriaRows = []; // Filas filtradas de Gloria + Lima + Pendientes
+let availableSapDates = []; // [{ dateISO: '2026-11-20', count: 15, selected: true }]
+let parsedSapRows = [];     // Filas finales de las fechas marcadas
 
 let dailyProgram = [];
 let dailyTrips = [];
@@ -49,9 +49,18 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("publishTargetDateInput").value = today;
   document.getElementById("monitorDateInput").value = today;
 
+  // Escuchar maestros en tiempo real y ocultar el botón de sincronización si ya existen
   db.collection("maestros").doc("cajasPorPaleta").onSnapshot((doc) => {
-    if (doc.exists) masterCajas = { ...INITIAL_CAJAS_POR_PALETA, ...doc.data() };
+    const btnSync = document.getElementById("btnSyncMasters");
+    if (doc.exists && Object.keys(doc.data() || {}).length > 0) {
+      masterCajas = { ...INITIAL_CAJAS_POR_PALETA, ...doc.data() };
+      localStorage.setItem("trupal_masters_synced", "true");
+      if (btnSync) btnSync.classList.add("hidden");
+    } else if (!localStorage.getItem("trupal_masters_synced")) {
+      if (btnSync) btnSync.classList.remove("hidden");
+    }
   });
+
   db.collection("maestros").doc("ubicaciones").onSnapshot((doc) => {
     if (doc.exists) masterUbicaciones = { ...INITIAL_UBICACIONES, ...doc.data() };
   });
@@ -75,7 +84,7 @@ function selectUser(role, name) {
 
   if (role === "AUDITOR") {
     document.getElementById("auditorView").classList.remove("hidden");
-    switchAuditorTab("viajes"); // Por defecto abre en Monitor de Viajes en Vivo (puedes cambiar a 'cargar')
+    switchAuditorTab("cargar");
     subscribeToDayData(document.getElementById("monitorDateInput").value);
   } else if (role === "CONDUCTOR") {
     document.getElementById("driverView").classList.remove("hidden");
@@ -105,13 +114,21 @@ function switchAuditorTab(tabName) {
   });
   document.getElementById(`auditorTab_${tabName}`).classList.remove("hidden");
   document.getElementById(`tabBtn_${tabName}`).classList.add("active");
+
+  // Mostrar KPIs, Fecha Operativa y Exportar Excel SOLO en 'viajes' y 'estado'
+  const showMonitorWidgets = tabName !== "cargar";
+  document.getElementById("auditorKpiGrid").classList.toggle("hidden", !showMonitorWidgets);
+  document.getElementById("auditorGlobalControls").classList.toggle("hidden", !showMonitorWidgets);
 }
 
 async function initMasterDataIfNeeded() {
   try {
     await db.collection("maestros").doc("cajasPorPaleta").set(masterCajas, { merge: true });
     await db.collection("maestros").doc("ubicaciones").set(masterUbicaciones, { merge: true });
-    alert("✅ Tablas maestras (Cajas por Paleta y Ubicaciones) sincronizadas en la nube.");
+    localStorage.setItem("trupal_masters_synced", "true");
+    const btnSync = document.getElementById("btnSyncMasters");
+    if (btnSync) btnSync.classList.add("hidden");
+    alert("✅ Tablas maestras sincronizadas en la nube. Este botón ya no volverá a mostrarse.");
   } catch (e) {
     alert("Error sincronizando maestros: " + e.message);
   }
@@ -195,7 +212,7 @@ function loadSapFileDates() {
       .map((d) => ({
         dateISO: d,
         count: countsByDate[d],
-        selected: d === today // Pre-marca hoy si existe
+        selected: d === today
       }));
 
     renderSapDateChips();
@@ -208,7 +225,7 @@ function renderSapDateChips() {
   const container = document.getElementById("sapDateChipsContainer");
   if (!availableSapDates.length) {
     box.classList.add("hidden");
-    return alert("No se encontraron pedidos de GLORIA con fecha válida en este archivo.");
+    return alert("No se encontraron pedidos de GLORIA (Región LIMA - No tratado / Tratado parcialmente) en este archivo.");
   }
 
   box.classList.remove("hidden");
@@ -260,7 +277,6 @@ function processSelectedSapDates() {
       };
     });
 
-  // Ordenar por fecha preferente y luego por Material
   parsedSapRows.sort((a, b) => a.fePrefEntrg.localeCompare(b.fePrefEntrg) || a.material.localeCompare(b.material));
 
   const datesListText = Array.from(selectedSet).sort().map(formatISOToDisplay).join(", ");
@@ -272,7 +288,7 @@ function renderSapPreview(datesListText) {
   const tbody = document.querySelector("#sapPreviewTable tbody");
   box.classList.remove("hidden");
   document.getElementById("sapSummaryText").textContent =
-    `Se importaron ${parsedSapRows.length} pedidos de GLORIA correspondientes a: ${datesListText}. Desmarca los que no salgan y publica.`;
+    `Se importaron ${parsedSapRows.length} pedidos de GLORIA (LIMA - Pendientes) para: ${datesListText}. Desmarca los que no salgan y publica.`;
 
   tbody.innerHTML = parsedSapRows.map((row, i) => `
     <tr>
@@ -305,7 +321,7 @@ async function publishDailyProgram() {
 
   document.getElementById("monitorDateInput").value = targetDate;
   subscribeToDayData(targetDate);
-  switchAuditorTab("estado"); // Lleva directo a ver el programa publicado
+  switchAuditorTab("estado");
   alert(`✅ Programa publicado (${selected.length} materiales) para la fecha operativa ${formatISOToDisplay(targetDate)}.`);
 }
 
@@ -650,7 +666,7 @@ function renderTripBuilder() {
             <div class="item-title">${it.material} — ${it.textoBreve}</div>
             <div class="item-meta">Orden SAP: <strong>${it.orden || 'S/N'}</strong> | Ubicación: <strong>${it.sinUbicacion ? '⚠️ REQUERIDA' : it.ubicacionActual}</strong></div>
           </div>
-          <button class="btn-danger" onclick="removeTripItem(${idx})">Quitar</button>
+          <button type="button" class="btn-danger" onclick="removeTripItem(${idx})">Quitar</button>
         </div>
 
         ${it.sinUbicacion ? `
@@ -686,12 +702,12 @@ function renderTripBuilder() {
               <input type="number" inputmode="numeric" value="${s.cantPaletas}"
                 oninput="updateSaldoField(${idx}, ${sIdx}, 'cantPaletas', this.value)" />
             </div>
-            <button class="btn-danger" onclick="removeSaldoRow(${idx}, ${sIdx})">X</button>
+            <button type="button" class="btn-danger" onclick="removeSaldoRow(${idx}, ${sIdx})">X</button>
           </div>
         `).join("")}
 
         <div style="margin-top:8px;">
-          <button class="btn-secondary" style="font-size:0.8rem; padding:6px 10px;" onclick="addSaldoRow(${idx})">+ Agregar Paleta de Saldo</button>
+          <button type="button" class="btn-secondary" style="font-size:0.8rem; padding:6px 10px;" onclick="addSaldoRow(${idx})">+ Agregar Paleta de Saldo</button>
         </div>
 
         <div class="item-subtotal" id="itemSubtotal_${idx}">
@@ -822,8 +838,8 @@ function renderForkliftTrips() {
               <div><strong>${it.material}</strong> — ${it.textoBreve}</div>
               <div class="item-meta">Total cargado: <strong>${it.totalPaletas} paletas</strong> (${it.totalCajas.toLocaleString()} cajas)</div>
               <div class="quick-btns">
-                <button class="btn-secondary" onclick="setQuickPallets('${t.id}', ${idx}, ${it.totalPaletas}, 0)">Todas Gloria (${it.totalPaletas})</button>
-                <button class="btn-secondary" onclick="setQuickPallets('${t.id}', ${idx}, 0, ${it.totalPaletas})">Todas Trupal (${it.totalPaletas})</button>
+                <button type="button" class="btn-secondary" onclick="setQuickPallets('${t.id}', ${idx}, ${it.totalPaletas}, 0)">Todas Gloria (${it.totalPaletas})</button>
+                <button type="button" class="btn-secondary" onclick="setQuickPallets('${t.id}', ${idx}, 0, ${it.totalPaletas})">Todas Trupal (${it.totalPaletas})</button>
               </div>
               <div class="calc-grid">
                 <div class="field">
@@ -839,7 +855,7 @@ function renderForkliftTrips() {
           `;
         }).join("")}
 
-        <button class="btn-primary btn-block" onclick="saveForkliftClassification('${t.id}')">
+        <button type="button" class="btn-primary btn-block" onclick="saveForkliftClassification('${t.id}')">
           Guardar Clasificación de Paletas
         </button>
       </div>
