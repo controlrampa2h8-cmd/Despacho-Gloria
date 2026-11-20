@@ -5,9 +5,11 @@ let currentUser = null;
 let masterCajas = { ...INITIAL_CAJAS_POR_PALETA };
 let masterUbicaciones = { ...INITIAL_UBICACIONES };
 
-let rawSapGloriaRows = []; // Filas filtradas de Gloria + Lima + Pendientes
-let availableSapDates = []; // [{ dateISO: '2026-11-20', count: 20, selected: true }]
-let parsedSapRows = [];     // Filas finales de las fechas marcadas
+let rawSapGloriaRows = [];     // Filas filtradas de Gloria + Lima + Pendientes
+let availableSapDates = [];    // [{ dateISO: '2026-11-20', count: 20, selected: true }]
+let parsedSapRows = [];        // Filas acumuladas en la vista previa
+let lastProcessedDatesKey = ""; // Huella exacta de las fechas ya procesadas
+let hasPublishedCurrentTarget = false; // Indica si la fecha operativa ya tiene programa publicado
 
 let dailyProgram = [];
 let dailyTrips = [];
@@ -50,6 +52,18 @@ function setElementVisible(elOrId, visible) {
     el.classList.add("hidden");
     el.style.display = "none";
   }
+}
+
+function getSelectedDatesKey() {
+  return availableSapDates
+    .filter((d) => d.selected)
+    .map((d) => d.dateISO)
+    .sort()
+    .join("|");
+}
+
+function getRowUniqueKey(row) {
+  return `${String(row.pedido || "").trim()}_${String(row.material || "").trim()}_${String(row.orden || "").trim()}`;
 }
 
 // ==========================================
@@ -98,6 +112,7 @@ function selectUser(role, name) {
     setElementVisible("auditorView", true);
     switchAuditorTab("cargar");
     subscribeToDayData(document.getElementById("monitorDateInput").value);
+    checkTargetDatePublishedStatus();
   } else if (role === "CONDUCTOR") {
     setElementVisible("driverView", true);
     setupDriverView();
@@ -126,13 +141,11 @@ function switchAuditorTab(tabName) {
     if (tabBtn) tabBtn.classList.toggle("active", t === tabName);
   });
 
-  // Mostrar KPIs, Fecha Operativa y Exportar Excel SOLO en 'viajes' y 'estado'
   const showMonitorWidgets = tabName !== "cargar";
   setElementVisible("auditorKpiGrid", showMonitorWidgets);
   setElementVisible("auditorGlobalControls", showMonitorWidgets);
 }
 
-// Minimizar / Maximizar secciones colapsables
 function toggleCollapseSection(bodyId, btnId, forceExpand = null) {
   const body = document.getElementById(bodyId);
   const btn = document.getElementById(btnId);
@@ -191,8 +204,51 @@ function renderAllViews() {
 }
 
 // ==========================================
-// MÓDULO 1: AUDITOR (SAP MULTI-FECHA -> PROGRAMA)
+// MÓDULO 1: AUDITOR (SAP MULTI-FECHA ACUMULATIVO)
 // ==========================================
+async function checkTargetDatePublishedStatus() {
+  const targetDate = document.getElementById("publishTargetDateInput")?.value;
+  if (!targetDate) return;
+  try {
+    const doc = await db.collection("programas").doc(targetDate).get();
+    hasPublishedCurrentTarget = doc.exists && Array.isArray(doc.data()?.items) && doc.data().items.length > 0;
+  } catch (e) {
+    hasPublishedCurrentTarget = false;
+  }
+  updatePublishActionButton(false);
+}
+
+function updatePublishActionButton(hasPendingChanges) {
+  const btnPub = document.getElementById("btnPublishDailyProgram");
+  const badgePub = document.getElementById("publishedStatusBadge");
+  const targetDate = document.getElementById("publishTargetDateInput")?.value || getTodayISO();
+  if (!btnPub || !badgePub) return;
+
+  if (!hasPublishedCurrentTarget) {
+    // Primer programa del día: siempre muestra "Publicar Programa del Día en Vivo"
+    btnPub.textContent = "✅ Publicar Programa del Día en Vivo";
+    setElementVisible(btnPub, true);
+    setElementVisible(badgePub, false);
+  } else if (hasPendingChanges) {
+    // Ya estaba publicado, pero se agregaron nuevas fechas o modificaron filas: muestra "Actualizar Programa"
+    btnPub.textContent = "🔄 Actualizar Programa del Día";
+    setElementVisible(btnPub, true);
+    setElementVisible(badgePub, false);
+  } else {
+    // Ya publicado y sin cambios pendientes: ocultar botón y mostrar insignia
+    setElementVisible(btnPub, false);
+    badgePub.textContent = `✅ Programa Publicado (${formatISOToDisplay(targetDate)})`;
+    setElementVisible(badgePub, true);
+  }
+}
+
+function syncProcessButtonVisibility() {
+  const currentKey = getSelectedDatesKey();
+  // Si no hay fechas seleccionadas o si son exactamente las mismas que ya se procesaron, ocultar el botón
+  const shouldShow = currentKey !== "" && currentKey !== lastProcessedDatesKey;
+  setElementVisible("processDatesBtnWrap", shouldShow);
+}
+
 function loadSapFileDates() {
   const fileInput = document.getElementById("sapFileInput");
   if (!fileInput.files.length) return;
@@ -226,6 +282,7 @@ function loadSapFileDates() {
     });
 
     const today = getTodayISO();
+    lastProcessedDatesKey = ""; // Reiniciar huella al leer nuevo archivo
     availableSapDates = Object.keys(countsByDate)
       .sort()
       .map((d) => ({
@@ -234,10 +291,9 @@ function loadSapFileDates() {
         selected: d === today
       }));
 
-    // Al leer un archivo nuevo, asegurar que el selector de fechas esté maximizado y el botón Procesar visible
     toggleCollapseSection("sapDatesCollapseBody", "btnToggleDatesCollapse", true);
-    setElementVisible("processDatesBtnWrap", true);
     renderSapDateChips();
+    syncProcessButtonVisibility();
   };
   reader.readAsArrayBuffer(fileInput.files[0]);
 }
@@ -260,28 +316,41 @@ function renderSapDateChips() {
   `).join("");
 }
 
-function showProcessDatesButtonAgain() {
-  setElementVisible("processDatesBtnWrap", true);
-}
-
 function toggleSapDateChip(idx, event) {
   if (event && event.target.tagName === "INPUT") return;
   availableSapDates[idx].selected = !availableSapDates[idx].selected;
-  showProcessDatesButtonAgain();
   renderSapDateChips();
+  syncProcessButtonVisibility();
 }
 
 function toggleAllSapDates(state) {
   availableSapDates.forEach((d) => (d.selected = state));
-  showProcessDatesButtonAgain();
   renderSapDateChips();
+  syncProcessButtonVisibility();
 }
 
-function processSelectedSapDates() {
+async function processSelectedSapDates() {
   const selectedSet = new Set(availableSapDates.filter((d) => d.selected).map((d) => d.dateISO));
   if (!selectedSet.size) return alert("Marca al menos una fecha de entrega para procesar.");
 
-  parsedSapRows = rawSapGloriaRows
+  const targetDate = document.getElementById("publishTargetDateInput").value;
+
+  // 1. Obtener los pedidos que YA existen publicados en la nube para esa fecha operativa (para nunca perderlos)
+  let existingPublishedItems = [];
+  if (targetDate) {
+    try {
+      const doc = await db.collection("programas").doc(targetDate).get();
+      if (doc.exists && Array.isArray(doc.data()?.items)) {
+        existingPublishedItems = doc.data().items;
+        hasPublishedCurrentTarget = existingPublishedItems.length > 0;
+      }
+    } catch (e) {
+      console.warn("No se pudo leer programa previo:", e);
+    }
+  }
+
+  // 2. Mapear las filas recién seleccionadas desde SAP
+  const newlyMappedRows = rawSapGloriaRows
     .filter((r) => selectedSet.has(formatSAPDateToISO(r["Fe.pref.entrg."])))
     .map((r, idx) => {
       const mat = String(r["Material"] || "").trim();
@@ -305,41 +374,75 @@ function processSelectedSapDates() {
       };
     });
 
+  // 3. FUSIÓN ACUMULATIVA: Conservar lo ya publicado + lo que ya estaba en vista previa + adicionar las nuevas filas sin duplicar
+  const mergedMap = new Map();
+
+  // Primero cargamos lo que ya estaba publicado en la nube para esa fecha operativa
+  existingPublishedItems.forEach((item) => {
+    mergedMap.set(getRowUniqueKey(item), { ...item, incluir: true });
+  });
+
+  // Luego conservamos lo que el auditor ya tuviera en pantalla (si aún no había publicado)
+  parsedSapRows.forEach((item) => {
+    const k = getRowUniqueKey(item);
+    if (!mergedMap.has(k)) {
+      mergedMap.set(k, item);
+    }
+  });
+
+  // Finalmente adicionamos los pedidos de las nuevas fechas seleccionadas
+  let addedCount = 0;
+  newlyMappedRows.forEach((item) => {
+    const k = getRowUniqueKey(item);
+    if (!mergedMap.has(k)) {
+      mergedMap.set(k, item);
+      addedCount++;
+    }
+  });
+
+  parsedSapRows = Array.from(mergedMap.values());
   parsedSapRows.sort((a, b) => a.fePrefEntrg.localeCompare(b.fePrefEntrg) || a.material.localeCompare(b.material));
 
-  // Ocultar el botón "Procesar e Importar Fechas Seleccionadas" hasta que se elija/modifique una fecha
-  setElementVisible("processDatesBtnWrap", false);
+  // Guardar la huella de fechas procesadas y ocultar el botón Procesar
+  lastProcessedDatesKey = getSelectedDatesKey();
+  syncProcessButtonVisibility();
 
-  // Mostrar el botón "Publicar Programa del Día en Vivo" listo para publicar
-  resetPublishButtonState();
+  // Mostrar el botón Publicar (si es 1ra vez) o Actualizar Programa (si ya existía programa)
+  updatePublishActionButton(true);
   toggleCollapseSection("sapPreviewCollapseBody", "btnTogglePreviewCollapse", true);
 
-  const datesListText = Array.from(selectedSet).sort().map(formatISOToDisplay).join(", ");
-  renderSapPreview(datesListText);
+  const uniqueDatesInTable = Array.from(new Set(parsedSapRows.map((r) => r.fePrefEntrg)))
+    .sort()
+    .map(formatISOToDisplay)
+    .join(", ");
+
+  renderSapPreview(uniqueDatesInTable, addedCount);
 }
 
-function resetPublishButtonState() {
-  setElementVisible("btnPublishDailyProgram", true);
-  setElementVisible("publishedStatusBadge", false);
-}
-
-function onTargetDateChange() {
-  // Cada vez que se cambia a otro día operativo, el botón principal de publicar vuelve a estar disponible
-  resetPublishButtonState();
+async function onTargetDateChange() {
+  parsedSapRows = [];
+  lastProcessedDatesKey = "";
+  setElementVisible("sapPreviewBox", false);
+  syncProcessButtonVisibility();
+  await checkTargetDatePublishedStatus();
 }
 
 function toggleRowInclusion(idx, isChecked) {
   parsedSapRows[idx].incluir = isChecked;
-  // Si el auditor edita qué filas incluir después de haber publicado, vuelve a aparecer el botón para actualizar
-  resetPublishButtonState();
+  updatePublishActionButton(true);
 }
 
-function renderSapPreview(datesListText) {
+function renderSapPreview(datesListText, addedCount = 0) {
   const box = document.getElementById("sapPreviewBox");
   const tbody = document.querySelector("#sapPreviewTable tbody");
   setElementVisible(box, true);
+
+  const extraMsg = hasPublishedCurrentTarget
+    ? ` (Se adicionaron ${addedCount} pedidos nuevos al programa existente).`
+    : `. Desmarca los que no salgan y publica.`;
+
   document.getElementById("sapSummaryText").textContent =
-    `Se importaron ${parsedSapRows.length} pedidos de GLORIA (LIMA - Pendientes) para: ${datesListText}. Desmarca los que no salgan y publica.`;
+    `Total acumulado: ${parsedSapRows.length} pedidos de GLORIA (Fechas incluidas: ${datesListText})${extraMsg}`;
 
   tbody.innerHTML = parsedSapRows.map((row, i) => `
     <tr>
@@ -364,22 +467,23 @@ async function publishDailyProgram() {
   const selected = parsedSapRows.filter((r) => r.incluir);
   if (!selected.length) return alert("No hay filas seleccionadas para publicar.");
 
+  const wasAlreadyPublished = hasPublishedCurrentTarget;
+
   await db.collection("programas").doc(targetDate).set({
     fechaOperativa: targetDate,
     updatedAt: Date.now(),
     items: selected
   });
 
-  // Ocultar el botón de publicar tras publicar; reaparecerá solo si se actualiza algo o se elige otro día
-  setElementVisible("btnPublishDailyProgram", false);
-  const badgePub = document.getElementById("publishedStatusBadge");
-  badgePub.textContent = `✅ Publicado (${formatISOToDisplay(targetDate)})`;
-  setElementVisible(badgePub, true);
+  hasPublishedCurrentTarget = true;
+  updatePublishActionButton(false);
 
   document.getElementById("monitorDateInput").value = targetDate;
   subscribeToDayData(targetDate);
   switchAuditorTab("estado");
-  alert(`✅ Programa publicado (${selected.length} materiales) para la fecha operativa ${formatISOToDisplay(targetDate)}.`);
+
+  const actionWord = wasAlreadyPublished ? "actualizado" : "publicado";
+  alert(`✅ Programa ${actionWord} correctamente (${selected.length} materiales acumulados) para el ${formatISOToDisplay(targetDate)}.`);
 }
 
 function renderAuditorDashboard() {
