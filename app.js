@@ -121,6 +121,17 @@ function switchAuditorTab(tabName) {
   document.getElementById("auditorGlobalControls").classList.toggle("hidden", !showMonitorWidgets);
 }
 
+// Minimizar / Maximizar secciones colapsables
+function toggleCollapseSection(bodyId, btnId, forceExpand = null) {
+  const body = document.getElementById(bodyId);
+  const btn = document.getElementById(btnId);
+  if (!body || !btn) return;
+
+  const shouldHide = forceExpand !== null ? !forceExpand : !body.classList.contains("hidden");
+  body.classList.toggle("hidden", shouldHide);
+  btn.textContent = shouldHide ? "➕ Maximizar" : "➖ Minimizar";
+}
+
 async function initMasterDataIfNeeded() {
   try {
     await db.collection("maestros").doc("cajasPorPaleta").set(masterCajas, { merge: true });
@@ -181,10 +192,7 @@ function loadSapFileDates() {
     const sheetName = workbook.SheetNames.includes("Tabla") ? "Tabla" : workbook.SheetNames[0];
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
 
-    // Filtrar estrictamente:
-    // 1. Cliente/Destinatario GLORIA
-    // 2. Región/Distrito == LIMA
-    // 3. Status del PV en ['NO TRATADO', 'TRATADO PARCIALMENTE']
+    // Filtrar estrictamente: GLORIA + Región LIMA + Status PV (No tratado / Tratado parcialmente)
     rawSapGloriaRows = rows.filter((r) => {
       const dest = String(r["Razón Social del Dest. de Mercancía"] || "").toUpperCase();
       const client = String(r["Razón social"] || "").toUpperCase();
@@ -199,7 +207,6 @@ function loadSapFileDates() {
       return isGloria && isLima && isPendingStatus;
     });
 
-    // Agrupar conteo por Fe.pref.entrg.
     const countsByDate = {};
     rawSapGloriaRows.forEach((r) => {
       const dISO = formatSAPDateToISO(r["Fe.pref.entrg."]);
@@ -215,6 +222,9 @@ function loadSapFileDates() {
         selected: d === today
       }));
 
+    // Al leer un archivo nuevo, asegurar que el selector de fechas esté maximizado y el botón Procesar visible
+    toggleCollapseSection("sapDatesCollapseBody", "btnToggleDatesCollapse", true);
+    document.getElementById("processDatesBtnWrap").classList.remove("hidden");
     renderSapDateChips();
   };
   reader.readAsArrayBuffer(fileInput.files[0]);
@@ -238,14 +248,20 @@ function renderSapDateChips() {
   `).join("");
 }
 
+function showProcessDatesButtonAgain() {
+  document.getElementById("processDatesBtnWrap").classList.remove("hidden");
+}
+
 function toggleSapDateChip(idx, event) {
   if (event && event.target.tagName === "INPUT") return;
   availableSapDates[idx].selected = !availableSapDates[idx].selected;
+  showProcessDatesButtonAgain();
   renderSapDateChips();
 }
 
 function toggleAllSapDates(state) {
   availableSapDates.forEach((d) => (d.selected = state));
+  showProcessDatesButtonAgain();
   renderSapDateChips();
 }
 
@@ -279,8 +295,33 @@ function processSelectedSapDates() {
 
   parsedSapRows.sort((a, b) => a.fePrefEntrg.localeCompare(b.fePrefEntrg) || a.material.localeCompare(b.material));
 
+  // Ocultar el botón "Procesar e Importar Fechas Seleccionadas" hasta que se elija/modifique una fecha
+  document.getElementById("processDatesBtnWrap").classList.add("hidden");
+
+  // Mostrar el botón "Publicar Programa del Día en Vivo" listo para publicar
+  resetPublishButtonState();
+  toggleCollapseSection("sapPreviewCollapseBody", "btnTogglePreviewCollapse", true);
+
   const datesListText = Array.from(selectedSet).sort().map(formatISOToDisplay).join(", ");
   renderSapPreview(datesListText);
+}
+
+function resetPublishButtonState() {
+  const btnPub = document.getElementById("btnPublishDailyProgram");
+  const badgePub = document.getElementById("publishedStatusBadge");
+  if (btnPub) btnPub.classList.remove("hidden");
+  if (badgePub) badgePub.classList.add("hidden");
+}
+
+function onTargetDateChange() {
+  // Cada vez que se cambia a otro día operativo, el botón principal de publicar vuelve a estar disponible
+  resetPublishButtonState();
+}
+
+function toggleRowInclusion(idx, isChecked) {
+  parsedSapRows[idx].incluir = isChecked;
+  // Si el auditor edita qué filas incluir después de haber publicado, vuelve a aparecer el botón para actualizar
+  resetPublishButtonState();
 }
 
 function renderSapPreview(datesListText) {
@@ -292,7 +333,7 @@ function renderSapPreview(datesListText) {
 
   tbody.innerHTML = parsedSapRows.map((row, i) => `
     <tr>
-      <td><input type="checkbox" style="width:18px;height:18px;" ${row.incluir ? "checked" : ""} onchange="parsedSapRows[${i}].incluir = this.checked" /></td>
+      <td><input type="checkbox" style="width:18px;height:18px;" ${row.incluir ? "checked" : ""} onchange="toggleRowInclusion(${i}, this.checked)" /></td>
       <td><strong>${row.material}</strong></td>
       <td>${row.textoBreve}</td>
       <td>${row.oc}</td>
@@ -318,6 +359,12 @@ async function publishDailyProgram() {
     updatedAt: Date.now(),
     items: selected
   });
+
+  // Ocultar el botón de publicar tras publicar; reaparecerá solo si se actualiza algo o se elige otro día
+  document.getElementById("btnPublishDailyProgram").classList.add("hidden");
+  const badgePub = document.getElementById("publishedStatusBadge");
+  badgePub.textContent = `✅ Publicado (${formatISOToDisplay(targetDate)})`;
+  badgePub.classList.remove("hidden");
 
   document.getElementById("monitorDateInput").value = targetDate;
   subscribeToDayData(targetDate);
