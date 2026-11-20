@@ -164,11 +164,22 @@ function loadSapFileDates() {
     const sheetName = workbook.SheetNames.includes("Tabla") ? "Tabla" : workbook.SheetNames[0];
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
 
-    // Filtrar solo registros de GLORIA
+    // Filtrar estrictamente:
+    // 1. Cliente/Destinatario GLORIA
+    // 2. Región/Distrito == LIMA
+    // 3. Status del PV en ['NO TRATADO', 'TRATADO PARCIALMENTE']
     rawSapGloriaRows = rows.filter((r) => {
       const dest = String(r["Razón Social del Dest. de Mercancía"] || "").toUpperCase();
       const client = String(r["Razón social"] || "").toUpperCase();
-      return dest.includes("GLORIA") || client.includes("GLORIA");
+      const isGloria = dest.includes("GLORIA") || client.includes("GLORIA");
+
+      const region = String(r["Región/Distrito"] || "").trim().toUpperCase();
+      const isLima = region === "LIMA";
+
+      const statusPV = String(r["Status del PV"] || "").trim().toUpperCase();
+      const isPendingStatus = statusPV === "NO TRATADO" || statusPV === "TRATADO PARCIALMENTE";
+
+      return isGloria && isLima && isPendingStatus;
     });
 
     // Agrupar conteo por Fe.pref.entrg.
